@@ -100,7 +100,9 @@ jobs:
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
 
       - name: Init submodules.
+        shell: pwsh
         run: |
+          if (Test-Path 'TBuild/Fuvligram/.gitmodules') { Set-Location 'TBuild/Fuvligram' }
           if ((Test-Path '.gitmodules') -and -not (Test-Path 'cmake/options.cmake')) {
             git config -f .gitmodules --get-regexp '^submodule\..*\.path$' | ForEach-Object {
               $p = $_ -split '\s+', 2
