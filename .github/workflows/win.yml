@@ -100,7 +100,20 @@ jobs:
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
 
       - name: Init submodules.
-        run: bash .github/init_subs.sh
+        run: |
+          if ((Test-Path '.gitmodules') -and -not (Test-Path 'cmake/options.cmake')) {
+            git config -f .gitmodules --get-regexp '^submodule\..*\.path$' | ForEach-Object {
+              $p = $_ -split '\s+', 2
+              $n = $p[0] -replace '^submodule\.', '' -replace '\.path$', ''
+              $d = $p[1].Trim()
+              $u = git config -f .gitmodules --get "submodule.$n.url"
+              if ($u -and -not (Test-Path "$d/.git")) {
+                if (Test-Path $d) { Remove-Item -Recurse -Force $d }
+                git clone --depth 1 --recursive $u $d
+              }
+            }
+            $global:LASTEXITCODE = 0
+          }
 
       - name: First set up.
         shell: bash
