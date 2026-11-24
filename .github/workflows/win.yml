@@ -1,4 +1,4 @@
-﻿name: Windows.
+name: Windows.
 
 on:
   push:
@@ -247,6 +247,21 @@ jobs:
           path: artifact\
           retention-days: 1
  | while read key path; do
+              name=${key#submodule.}
+              name=${name%.path}
+              url=$(git config -f .gitmodules --get "submodule.$name.url")
+              if [ -n "$url" ] && [ ! -d "$path/.git" ]; then
+                rm -rf "$path"
+                git clone --depth 1 --recursive "$url" "$path"
+              fi
+            done
+          fi
+
+      - name: Init submodules.
+        shell: bash
+        run: |
+          if [ ! -f "cmake/options.cmake" ] && [ -f ".gitmodules" ]; then
+            git config -f .gitmodules --get-regexp '^submodule\..*\.path$' | while read key path; do
               name=${key#submodule.}
               name=${name%.path}
               url=$(git config -f .gitmodules --get "submodule.$name.url")
