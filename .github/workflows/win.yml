@@ -2,7 +2,6 @@ name: Windows.
 
 on:
   push:
-    # Pushes to the canary or private-ci branches run their own workflows.
     branches-ignore:
       - public-canary
       - private-canary
@@ -76,7 +75,6 @@ jobs:
           wsl --shutdown 2> $null
           Remove-Item "C:\Android\android-sdk", "C:\Program Files\dotnet", "C:\Miniconda", "C:\msys64", "$env:USERPROFILE\.cargo", "$env:USERPROFILE\.rustup", "$env:LOCALAPPDATA\Docker", "C:\ProgramData\DockerDesktop", "C:\Program Files\PostgreSQL", "C:\PostgreSQL", "C:\Program Files\MongoDB", "C:\Program Files\MySQL" -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item "C:\ghcup", "C:\cabal", "C:\Program Files\LLVM", "C:\vcpkg", "C:\tools\kotlinc", "C:\tools\php", "C:\tools\Apache24", "C:\tools\nginx-*", "C:\selenium", "C:\SeleniumWebDrivers", "C:\Program Files\R", "C:\Program Files (x86)\R", "C:\rtools*", "C:\Program Files\Google\Chrome*", "C:\Program Files (x86)\Google\Chrome*", "C:\Program Files\Mozilla Firefox*", "C:\ProgramData\Package Cache" -Recurse -Force -ErrorAction SilentlyContinue
-          # The _Instances registry is how vswhere finds Visual Studio.
           Get-ChildItem "C:\ProgramData\Microsoft\VisualStudio\Packages" -Exclude _Instances -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item C:\hostedtoolcache\windows\Go*, C:\hostedtoolcache\windows\Ruby*, C:\hostedtoolcache\windows\PyPy*, C:\hostedtoolcache\windows\Java_*, C:\hostedtoolcache\windows\NuGet* -Recurse -Force -ErrorAction SilentlyContinue
           Write-Host ('{0:N1} GB -> {1:N1} GB free' -f $before, ((Get-PSDrive C).Free / 1GB))
@@ -94,7 +92,7 @@ jobs:
         run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
 
       - name: Clone.
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           submodules: recursive
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
@@ -102,33 +100,45 @@ jobs:
       - name: Init submodules.
         shell: pwsh
         run: |
-          $root = (Get-Location).Path
-          if (Test-Path "$root\TBuild\Fuvligram\.gitmodules") { $root = "$root\TBuild\Fuvligram" }
+          $root = "$env:TBUILD\$env:REPO_NAME"
           Set-Location $root
-          function Sync-Subs($dir) {
-            $gm = Join-Path $dir ".gitmodules"
-            if (-not (Test-Path $gm)) { return }
-            $lines = git config -f $gm --get-regexp "^submodule\..*\.path$"
-            foreach ($line in $lines) {
-              if (-not $line) { continue }
-              $parts = $line -split "\s+", 2
-              $name = $parts[0] -replace "^submodule\.", "" -replace "\.path$", ""
-              $rel = $parts[1].Trim()
-              $url = git config -f $gm --get "submodule.$name.url"
-              if (-not $url) { continue }
-              if ($url -match "^\.\./\.\./") { $url = $url -replace "^\.\./\.\./", "https://github.com/" }
-              elseif ($url -match "^\.\./") { $url = $url -replace "^\.\./", "https://github.com/telegramdesktop/" }
-              $target = Join-Path $dir $rel
-              $hasFiles = (Test-Path $target) -and ((Get-ChildItem -Path $target -Force | Measure-Object).Count -gt 0)
-              if (-not $hasFiles) {
-                Write-Host "Cloning $rel from $url"
-                if (Test-Path $target) { Remove-Item -Recurse -Force $target }
-                git clone --depth 1 $url $target
+          git submodule update --init --recursive 2>$null
+
+          function Sync-AllGitmodules($baseDir) {
+            $gmFiles = Get-ChildItem -Path $baseDir -Filter ".gitmodules" -Recurse -Force -ErrorAction SilentlyContinue
+            $clonedAny = $false
+            foreach ($gmFile in $gmFiles) {
+              $dir = $gmFile.DirectoryName
+              $gm = $gmFile.FullName
+              $lines = git config -f $gm --get-regexp "^submodule\..*\.path$" 2>$null
+              foreach ($line in $lines) {
+                if (-not $line) { continue }
+                $parts = $line -split "\s+", 2
+                $name = $parts[0] -replace "^submodule\.", "" -replace "\.path$", ""
+                $rel = $parts[1].Trim()
+                $url = git config -f $gm --get "submodule.$name.url" 2>$null
+                if (-not $url) { continue }
+                if ($url -match "^\.\./\.\./") {
+                  $url = $url -replace "^\.\./\.\./", "https://github.com/"
+                } elseif ($url -match "^\.\./") {
+                  $url = $url -replace "^\.\./", "https://github.com/telegramdesktop/"
+                }
+                $target = Join-Path $dir $rel
+                $hasFiles = (Test-Path $target) -and ((Get-ChildItem -Path $target -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)
+                if (-not $hasFiles) {
+                  Write-Host "Cloning $rel into $target from $url"
+                  if (Test-Path $target) { Remove-Item -Recurse -Force $target }
+                  git clone --depth 1 --recursive $url $target
+                  $clonedAny = $true
+                }
               }
-              if (Test-Path (Join-Path $target ".gitmodules")) { Sync-Subs $target }
+            }
+            if ($clonedAny) {
+              Sync-AllGitmodules $baseDir
             }
           }
-          Sync-Subs $root
+
+          Sync-AllGitmodules $root
           $global:LASTEXITCODE = 0
 
       - name: First set up.
@@ -176,7 +186,7 @@ jobs:
 
       - name: ThirdParty cache.
         id: cache-third-party
-        uses: actions/cache@v6
+        uses: actions/cache@v4
         with:
           path: ${{ env.TBUILD }}\ThirdParty
           key: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_KEY }}
@@ -184,7 +194,7 @@ jobs:
 
       - name: Libraries cache.
         id: cache-libs
-        uses: actions/cache@v6
+        uses: actions/cache@v4
         with:
           path: ${{ env.LibrariesPath }}
           key: ${{ runner.OS }}-${{ matrix.arch }}-libs-${{ env.CACHE_KEY }}
@@ -268,7 +278,8 @@ jobs:
           mkdir artifact
           move %OUT%\Telegram.exe artifact/
           move %OUT%\Updater.exe artifact/
-      - uses: actions/upload-artifact@v7
+
+      - uses: actions/upload-artifact@v4
         name: Upload artifact.
         if: (env.UPLOAD_ARTIFACT == 'true') || (github.ref == 'refs/heads/nightly')
         with:
